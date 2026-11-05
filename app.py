@@ -1,6 +1,7 @@
 import os
 import re
 import sqlite3
+import fines
 from datetime import date, timedelta
 
 from flask import Flask, jsonify, request
@@ -255,9 +256,9 @@ def list_loans():
     result = []
     for loan in rows:
         current_fine = loan[5]
-        days_late = (date.today() - date.fromisoformat(loan[3])).days
+        days_late = fines.days_late(loan[3])
         if loan[4] == 0:
-            current_fine = max(0, days_late) * 0.50
+            current_fine = fines.fine_for(loan[3])
         if request.args.get("overdue") == "true" and (loan[4] == 1 or days_late <= 0):
             continue
         result.append(
@@ -267,11 +268,11 @@ def list_loans():
                 "member_id": loan[2],
                 "due_date": loan[3],
                 "returned": bool(loan[4]),
-                "fine": money(loan[5]),
+                "fine":fines.money(loan[5]),
                 "fine_paid": bool(loan[6]),
                 "renewals": loan[7],
                 "checked_out": loan[8],
-                "current_fine": money(current_fine),
+                "current_fine": fines.money(current_fine),
             }
         )
     return jsonify(result)
@@ -286,8 +287,7 @@ def get_loan(loan_id):
         return jsonify({"error": "loan not found"}), 404
     current_fine = loan[5]
     if loan[4] == 0:
-        days_late = (date.today() - date.fromisoformat(loan[3])).days
-        current_fine = max(0, days_late) * 0.50
+        current_fine = fines.fine_for(loan[3])
     return jsonify(
         {
             "id": loan[0],
@@ -390,8 +390,7 @@ def return_book(loan_id):
         conn.close()
         return jsonify({"error": "loan already returned"}), 409
 
-    days_late = (date.today() - date.fromisoformat(loan[3])).days
-    fine = max(0, days_late) * 0.50
+    fine = fines.fine_for(loan[3])
     conn.execute("UPDATE loans SET returned = 1, fine = ? WHERE id = ?", (fine, loan_id))
     conn.execute("UPDATE books SET available = 1 WHERE id = ?", (loan[1],))
     conn.commit()
@@ -523,14 +522,14 @@ def report_overdue():
     items = []
     total = 0
     for r in rows:
-        days_late = (date.today() - date.fromisoformat(r[3])).days
+        days_late = fines.days_late(r[3])
         if days_late > 0:
-            fine = days_late * 0.5
+            fine = fines.fine_for(r[3])
             total += fine
             items.append(
-                {"loan_id": r[0], "title": r[1], "member": r[2], "days_late": days_late, "fine": money(fine)}
+                {"loan_id": r[0], "title": r[1], "member": r[2], "days_late": days_late, "fine": fines.money(fine)}
             )
-    return jsonify({"items": items, "total_fines": money(total)})
+    return jsonify({"items": items, "total_fines": fines.money(total)})
 
 
 @app.route("/reports/summary", methods=["GET"])
